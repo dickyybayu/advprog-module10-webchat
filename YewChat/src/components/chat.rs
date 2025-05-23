@@ -63,17 +63,14 @@ impl Component for Chat {
 
         let message = WebSocketMessage {
             message_type: MsgTypes::Register,
-            data: Some(username.to_string()),
+            data: Some(username),
             data_array: None,
         };
 
-        if let Ok(_) = wss
+        let _ = wss
             .tx
             .clone()
-            .try_send(serde_json::to_string(&message).unwrap())
-        {
-            log::debug!("message sent successfully");
-        }
+            .try_send(serde_json::to_string(&message).unwrap());
 
         Self {
             users: vec![],
@@ -91,45 +88,45 @@ impl Component for Chat {
                 let msg: WebSocketMessage = serde_json::from_str(&s).unwrap();
                 match msg.message_type {
                     MsgTypes::Users => {
-                        let users_from_message = msg.data_array.unwrap_or_default();
-                        self.users = users_from_message
+                        self.users = msg
+                            .data_array
+                            .unwrap_or_default()
                             .iter()
                             .map(|u| UserProfile {
-                                name: u.into(),
+                                name: u.clone(),
                                 avatar: format!(
                                     "https://avatars.dicebear.com/api/adventurer-neutral/{}.svg",
                                     u
-                                )
-                                .into(),
+                                ),
                             })
                             .collect();
                         true
                     }
                     MsgTypes::Message => {
-                        let message_data: MessageData =
-                            serde_json::from_str(&msg.data.unwrap()).unwrap();
-                        self.messages.push(message_data);
-                        true
+                        if let Some(data) = msg.data {
+                            if let Ok(message_data) = serde_json::from_str::<MessageData>(&data) {
+                                self.messages.push(message_data);
+                                return true;
+                            }
+                        }
+                        false
                     }
                     _ => false,
                 }
             }
             Msg::SubmitMessage => {
-                let input = self.chat_input.cast::<HtmlInputElement>();
-                if let Some(input) = input {
+                if let Some(input) = self.chat_input.cast::<HtmlInputElement>() {
+                    let text = input.value();
                     let message = WebSocketMessage {
                         message_type: MsgTypes::Message,
-                        data: Some(input.value()),
+                        data: Some(text),
                         data_array: None,
                     };
-                    if let Err(e) = self
+                    let _ = self
                         .wss
                         .tx
                         .clone()
-                        .try_send(serde_json::to_string(&message).unwrap())
-                    {
-                        log::debug!("error sending to channel: {:?}", e);
-                    }
+                        .try_send(serde_json::to_string(&message).unwrap());
                     input.set_value("");
                 }
                 false
@@ -164,9 +161,7 @@ impl Component for Chat {
                                         <div class="flex text-xs justify-between">
                                             <div>{u.name.clone()}</div>
                                         </div>
-                                        <div class="text-xs text-gray-400">
-                                            {"Hi there!"}
-                                        </div>
+                                        <div class="text-xs text-gray-400">{"Hi there!"}</div>
                                     </div>
                                 </div>
                             }
@@ -183,10 +178,12 @@ impl Component for Chat {
                     <div class="w-full grow overflow-auto border-b-2 border-gray-300">
                         {
                             self.messages.iter().map(|m| {
-                                let user = self.users.iter().find(|u| u.name == m.from).unwrap();
+                                let user_opt = self.users.iter().find(|u| u.name == m.from);
                                 html! {
                                     <div class={classes!("flex", "items-end", "w-3/6", message_bg.clone(), "m-8", "rounded-tl-lg", "rounded-tr-lg", "rounded-br-lg")}>
-                                        <img class="w-8 h-8 rounded-full m-3" src={user.avatar.clone()} alt="avatar"/>
+                                        if let Some(user) = user_opt {
+                                            <img class="w-8 h-8 rounded-full m-3" src={user.avatar.clone()} alt="avatar"/>
+                                        }
                                         <div class="p-3">
                                             <div class="text-sm">{ &m.from }</div>
                                             <div class="text-xs text-gray-500">
