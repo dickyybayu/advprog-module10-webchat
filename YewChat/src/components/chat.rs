@@ -9,6 +9,7 @@ use crate::{services::websocket::WebsocketService, User};
 pub enum Msg {
     HandleMsg(String),
     SubmitMessage,
+    ToggleTheme,
 }
 
 #[derive(Deserialize)]
@@ -45,7 +46,9 @@ pub struct Chat {
     _producer: Box<dyn Bridge<EventBus>>,
     wss: WebsocketService,
     messages: Vec<MessageData>,
+    is_dark: bool,
 }
+
 impl Component for Chat {
     type Message = Msg;
     type Properties = ();
@@ -77,6 +80,7 @@ impl Component for Chat {
             messages: vec![],
             chat_input: NodeRef::default(),
             wss,
+            is_dark: false,
             _producer: EventBus::bridge(ctx.link().callback(Msg::HandleMsg)),
         }
     }
@@ -99,17 +103,15 @@ impl Component for Chat {
                                 .into(),
                             })
                             .collect();
-                        return true;
+                        true
                     }
                     MsgTypes::Message => {
                         let message_data: MessageData =
                             serde_json::from_str(&msg.data.unwrap()).unwrap();
                         self.messages.push(message_data);
-                        return true;
+                        true
                     }
-                    _ => {
-                        return false;
-                    }
+                    _ => false,
                 }
             }
             Msg::SubmitMessage => {
@@ -129,26 +131,35 @@ impl Component for Chat {
                         log::debug!("error sending to channel: {:?}", e);
                     }
                     input.set_value("");
-                };
+                }
                 false
+            }
+            Msg::ToggleTheme => {
+                self.is_dark = !self.is_dark;
+                true
             }
         }
     }
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let submit = ctx.link().callback(|_| Msg::SubmitMessage);
+        let toggle_theme = ctx.link().callback(|_| Msg::ToggleTheme);
+
+        let theme_class = if self.is_dark { "bg-gray-900 text-white" } else { "bg-white text-black" };
+        let sidebar_bg = if self.is_dark { "bg-gray-800" } else { "bg-gray-100" };
+        let user_card_bg = if self.is_dark { "bg-gray-700" } else { "bg-white" };
+        let message_bg = if self.is_dark { "bg-gray-700" } else { "bg-gray-100" };
+        let input_bg = if self.is_dark { "bg-gray-800 text-white" } else { "bg-gray-100 text-black" };
 
         html! {
-            <div class="flex w-screen">
-                <div class="flex-none w-56 h-screen bg-gray-100">
+            <div class={classes!("flex", "w-screen", theme_class)}>
+                <div class={classes!("flex-none", "w-56", "h-screen", sidebar_bg)}>
                     <div class="text-xl p-3">{"Users"}</div>
                     {
-                        self.users.clone().iter().map(|u| {
-                            html!{
-                                <div class="flex m-3 bg-white rounded-lg p-2">
-                                    <div>
-                                        <img class="w-12 h-12 rounded-full" src={u.avatar.clone()} alt="avatar"/>
-                                    </div>
+                        self.users.iter().map(|u| {
+                            html! {
+                                <div class={classes!("flex", "m-3", user_card_bg.clone(), "rounded-lg", "p-2")}>
+                                    <img class="w-12 h-12 rounded-full" src={u.avatar.clone()} alt="avatar" />
                                     <div class="flex-grow p-3">
                                         <div class="flex text-xs justify-between">
                                             <div>{u.name.clone()}</div>
@@ -163,23 +174,28 @@ impl Component for Chat {
                     }
                 </div>
                 <div class="grow h-screen flex flex-col">
-                    <div class="w-full h-14 border-b-2 border-gray-300"><div class="text-xl p-3">{"💬 Chat!"}</div></div>
+                    <div class="w-full h-14 border-b-2 border-gray-300 flex justify-between items-center px-3">
+                        <div class="text-xl">{"💬 Chat!"}</div>
+                        <button onclick={toggle_theme} class="text-sm bg-gray-600 text-white px-3 py-1 rounded">
+                            { if self.is_dark { "☀ Light Mode" } else { "🌙 Dark Mode" } }
+                        </button>
+                    </div>
                     <div class="w-full grow overflow-auto border-b-2 border-gray-300">
                         {
                             self.messages.iter().map(|m| {
                                 let user = self.users.iter().find(|u| u.name == m.from).unwrap();
-                                html!{
-                                    <div class="flex items-end w-3/6 bg-gray-100 m-8 rounded-tl-lg rounded-tr-lg rounded-br-lg ">
+                                html! {
+                                    <div class={classes!("flex", "items-end", "w-3/6", message_bg.clone(), "m-8", "rounded-tl-lg", "rounded-tr-lg", "rounded-br-lg")}>
                                         <img class="w-8 h-8 rounded-full m-3" src={user.avatar.clone()} alt="avatar"/>
                                         <div class="p-3">
-                                            <div class="text-sm">
-                                                {m.from.clone()}
-                                            </div>
+                                            <div class="text-sm">{ &m.from }</div>
                                             <div class="text-xs text-gray-500">
-                                                if m.message.ends_with(".gif") {
-                                                    <img class="mt-3" src={m.message.clone()}/>
-                                                } else {
-                                                    {m.message.clone()}
+                                                {
+                                                    if m.message.ends_with(".gif") {
+                                                        html! { <img class="mt-3" src={m.message.clone()} /> }
+                                                    } else {
+                                                        html! { &m.message }
+                                                    }
                                                 }
                                             </div>
                                         </div>
@@ -187,13 +203,13 @@ impl Component for Chat {
                                 }
                             }).collect::<Html>()
                         }
-
                     </div>
                     <div class="w-full h-14 flex px-3 items-center">
-                        <input ref={self.chat_input.clone()} type="text" placeholder="Message" class="block w-full py-2 pl-4 mx-3 bg-gray-100 rounded-full outline-none focus:text-gray-700" name="message" required=true />
-                        <button onclick={submit} class="p-3 shadow-sm bg-blue-600 w-10 h-10 rounded-full flex justify-center items-center color-white">
+                        <input ref={self.chat_input.clone()} type="text" placeholder="Message" class={classes!("block", "w-full", "py-2", "pl-4", "mx-3", input_bg.clone(), "rounded-full", "outline-none", "focus:text-gray-700")} />
+                        <button onclick={submit} class="p-3 shadow-sm bg-blue-600 w-10 h-10 rounded-full flex justify-center items-center">
                             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" class="fill-white">
-                                <path d="M0 0h24v24H0z" fill="none"></path><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
+                                <path d="M0 0h24v24H0z" fill="none"/>
+                                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
                             </svg>
                         </button>
                     </div>
